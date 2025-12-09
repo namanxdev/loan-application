@@ -91,22 +91,45 @@ app.mount("/pdfs", StaticFiles(directory=static_dir), name="pdfs")
 # Include API routes
 app.include_router(router)
 
+# Include Chat routes for conversational loan application
+from api.chat_routes import chat_router
+app.include_router(chat_router)
+
 
 @app.get("/")
 def root():
     """Root endpoint with API info"""
     return {
         "service": "Loan Processing API",
-        "version": "1.0.0",
+        "version": "2.0.0",
+        "description": "Agentic Loan Processing with Conversational AI",
         "docs": "/docs",
         "health": "/health",
         "endpoints": {
-            "create_application": "POST /apply",
-            "process_application": "POST /process/{application_id}",
-            "get_application": "GET /application/{application_id}",
-            "list_applications": "GET /applications",
-            "download_pdf": "GET /pdfs/{application_id}.pdf"
-        }
+            "# Traditional API": {
+                "create_application": "POST /apply",
+                "process_application": "POST /process/{application_id}",
+                "get_application": "GET /application/{application_id}",
+                "list_applications": "GET /applications",
+                "download_pdf": "GET /pdfs/{application_id}.pdf"
+            },
+            "# Chat API (Conversational)": {
+                "start_chat": "POST /chat/start",
+                "send_message": "POST /chat/message",
+                "process_application": "POST /chat/process",
+                "get_session": "GET /chat/session/{session_id}",
+                "get_history": "GET /chat/history/{session_id}",
+                "end_session": "DELETE /chat/session/{session_id}"
+            }
+        },
+        "workflow": [
+            "1. Customer lands on chatbot → Master Agent",
+            "2. Discusses loan amount & terms → Sales Agent",
+            "3. Performs KYC verification → Verification Agent",
+            "4. Checks credit score, salary, eligibility → Underwriting Agent",
+            "5. Generates sanction letter → Sanction Agent",
+            "6. Customer receives instant approval/rejection → Master Agent"
+        ]
     }
 
 
