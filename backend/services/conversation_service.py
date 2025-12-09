@@ -4,30 +4,72 @@ Conversation Service - Manages chat sessions and conversation state
 Handles:
 - Session creation and management
 - Conversation history storage
-- State persistence
+- State persistence using PostgreSQL
 - Memory management for RAG context
+
+Note: This implementation uses PostgreSQL for persistence.
+For production at scale, migrate to Redis for better performance.
 """
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
-from collections import defaultdict
-import threading
+from contextlib import contextmanager
+
+from sqlalchemy.orm import Session as DBSession
+from services.database import SessionLocal
+from models.schemas import ConversationSession as ConversationSessionModel
 
 
 class ConversationSession:
-    """Represents a single conversation session"""
+    """
+    Represents a single conversation session.
+    Wrapper class that interfaces with the database model.
+    """
     
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, db_session: Optional[ConversationSessionModel] = None):
         self.session_id = session_id
-        self.messages: List[Dict[str, Any]] = []
-        self.collected_data: Dict[str, Any] = {}
-        self.stage: str = "greeting"
-        self.application_id: Optional[int] = None
-        self.is_active: bool = True
-        self.created_at: datetime = datetime.utcnow()
-        self.updated_at: datetime = datetime.utcnow()
-        self.processing_result: Optional[Dict[str, Any]] = None
+        self._db_model = db_session
+        
+        # Load from database model or initialize defaults
+        if db_session:
+            self.messages: List[Dict[str, Any]] = db_session.messages or []
+            self.collected_data: Dict[str, Any] = db_session.collected_data or {}
+            self.stage: str = db_session.stage or "greeting"
+            self.application_id: Optional[int] = db_session.application_id
+            self.is_active: bool = db_session.is_active
+            self.created_at: datetime = db_session.created_at
+            self.updated_at: datetime = db_session.updated_at
+            self.processing_result: Optional[Dict[str, Any]] = db_session.processing_result
+        else:
+            self.messages = []
+            self.collected_data = {}
+            self.stage = "greeting"
+            self.application_id = None
+            self.is_active = True
+            self.created_at = datetime.utcnow()
+            self.updated_at = datetime.utcnow()
+            self.processing_result = None
+    
+    def _save_to_db(self):
+        """Save current state to database"""
+        db = SessionLocal()
+        try:
+            db_session = db.query(ConversationSessionModel).filter(
+                ConversationSessionModel.session_id == self.session_id
+            ).first()
+            
+            if db_session:
+                db_session.messages = self.messages
+                db_session.collected_data = self.collected_data
+                db_session.stage = self.stage
+                db_session.application_id = self.application_id
+                db_session.is_active = self.is_active
+                db_session.processing_result = self.processing_result
+                db_session.updated_at = datetime.utcnow()
+                db.commit()
+        finally:
+            db.close()
         
     def add_message(self, role: str, content: str, metadata: Optional[Dict] = None):
         """Add a message to the conversation history"""
@@ -38,31 +80,37 @@ class ConversationSession:
             "metadata": metadata or {}
         })
         self.updated_at = datetime.utcnow()
+        self._save_to_db()
     
     def update_data(self, new_data: Dict[str, Any]):
         """Update collected application data"""
         self.collected_data.update(new_data)
         self.updated_at = datetime.utcnow()
+        self._save_to_db()
     
     def set_stage(self, stage: str):
         """Update conversation stage"""
         self.stage = stage
         self.updated_at = datetime.utcnow()
+        self._save_to_db()
     
     def set_application_id(self, app_id: int):
         """Set the database application ID"""
         self.application_id = app_id
         self.updated_at = datetime.utcnow()
+        self._save_to_db()
     
     def set_processing_result(self, result: Dict[str, Any]):
         """Store processing result"""
         self.processing_result = result
         self.updated_at = datetime.utcnow()
+        self._save_to_db()
     
     def deactivate(self):
         """Mark session as inactive"""
         self.is_active = False
         self.updated_at = datetime.utcnow()
+        self._save_to_db()
     
     def get_context_window(self, max_messages: int = 10) -> List[Dict]:
         """Get recent messages for context"""
@@ -77,56 +125,84 @@ class ConversationSession:
             "stage": self.stage,
             "application_id": self.application_id,
             "is_active": self.is_active,
-            "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat(),
+            "created_at": self.created_at.isoformat() if isinstance(self.created_at, datetime) else self.created_at,
+            "updated_at": self.updated_at.isoformat() if isinstance(self.updated_at, datetime) else self.updated_at,
             "processing_result": self.processing_result
         }
 
 
 class ConversationManager:
     """
-    Manages all conversation sessions.
+    Manages all conversation sessions using PostgreSQL for persistence.
     
-    This is an in-memory implementation. For production, 
-    consider using Redis or a database for persistence.
+    Uses SQLAlchemy ORM to store sessions in the conversation_sessions table.
+    Maintains the same public API as the in-memory implementation for 
+    compatibility with existing code.
+    
+    For production at scale, migrate to Redis for better performance.
     """
     
     _instance = None
-    _lock = threading.Lock()
     
     def __new__(cls):
         """Singleton pattern for conversation manager"""
         if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
         return cls._instance
     
     def __init__(self):
         if self._initialized:
             return
-        self.sessions: Dict[str, ConversationSession] = {}
-        self._lock = threading.Lock()
         self._initialized = True
     
+    @contextmanager
+    def _get_db(self):
+        """Context manager for database sessions"""
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+    
     def create_session(self, session_id: Optional[str] = None) -> ConversationSession:
-        """Create a new conversation session"""
+        """Create a new conversation session in the database"""
         if session_id is None:
             session_id = str(uuid.uuid4())
         
-        with self._lock:
-            if session_id in self.sessions:
-                # Return existing session
-                return self.sessions[session_id]
+        with self._get_db() as db:
+            # Check if session already exists
+            existing = db.query(ConversationSessionModel).filter(
+                ConversationSessionModel.session_id == session_id
+            ).first()
             
-            session = ConversationSession(session_id)
-            self.sessions[session_id] = session
-            return session
+            if existing:
+                return ConversationSession(session_id, existing)
+            
+            # Create new session in database
+            db_session = ConversationSessionModel(
+                session_id=session_id,
+                messages=[],
+                collected_data={},
+                stage="greeting",
+                is_active=True
+            )
+            db.add(db_session)
+            db.commit()
+            db.refresh(db_session)
+            
+            return ConversationSession(session_id, db_session)
     
     def get_session(self, session_id: str) -> Optional[ConversationSession]:
-        """Get an existing session by ID"""
-        return self.sessions.get(session_id)
+        """Get an existing session by ID from the database"""
+        with self._get_db() as db:
+            db_session = db.query(ConversationSessionModel).filter(
+                ConversationSessionModel.session_id == session_id
+            ).first()
+            
+            if db_session:
+                return ConversationSession(session_id, db_session)
+            return None
     
     def get_or_create_session(self, session_id: str) -> ConversationSession:
         """Get existing session or create new one"""
@@ -136,38 +212,41 @@ class ConversationManager:
         return session
     
     def delete_session(self, session_id: str) -> bool:
-        """Delete a session"""
-        with self._lock:
-            if session_id in self.sessions:
-                del self.sessions[session_id]
+        """Delete a session from the database"""
+        with self._get_db() as db:
+            db_session = db.query(ConversationSessionModel).filter(
+                ConversationSessionModel.session_id == session_id
+            ).first()
+            
+            if db_session:
+                db.delete(db_session)
+                db.commit()
                 return True
             return False
     
     def list_active_sessions(self) -> List[str]:
         """Get list of active session IDs"""
-        return [
-            sid for sid, session in self.sessions.items() 
-            if session.is_active
-        ]
+        with self._get_db() as db:
+            sessions = db.query(ConversationSessionModel.session_id).filter(
+                ConversationSessionModel.is_active == True
+            ).all()
+            return [s.session_id for s in sessions]
     
     def get_session_count(self) -> int:
         """Get total number of sessions"""
-        return len(self.sessions)
+        with self._get_db() as db:
+            return db.query(ConversationSessionModel).count()
     
-    def cleanup_old_sessions(self, max_age_hours: int = 24):
+    def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
         """Remove sessions older than specified hours"""
-        from datetime import timedelta
         cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
         
-        with self._lock:
-            to_delete = [
-                sid for sid, session in self.sessions.items()
-                if session.updated_at < cutoff
-            ]
-            for sid in to_delete:
-                del self.sessions[sid]
-        
-        return len(to_delete)
+        with self._get_db() as db:
+            deleted = db.query(ConversationSessionModel).filter(
+                ConversationSessionModel.updated_at < cutoff
+            ).delete()
+            db.commit()
+            return deleted
 
 
 class RAGContextBuilder:

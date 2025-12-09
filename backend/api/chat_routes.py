@@ -10,8 +10,9 @@ Endpoints:
 - DELETE /chat/session/{session_id} - End a chat session
 """
 
+import re
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, List, Tuple
 from fastapi import APIRouter, HTTPException, status, Depends
 from sqlalchemy.orm import Session
 
@@ -37,6 +38,97 @@ from services.database import get_db
 from models.schemas import Application
 from agents.master_agent import master_agent
 from graph.chat_graph import run_chat_workflow
+
+
+# ============== Validation Helpers ==============
+
+def validate_application_data(data: Dict) -> Tuple[Dict, List[str]]:
+    """
+    Validate and sanitize application data with user-friendly error messages.
+    
+    Args:
+        data: Dictionary containing application fields
+        
+    Returns:
+        Tuple of (sanitized_data, error_messages)
+        - sanitized_data: Cleaned and normalized data
+        - error_messages: List of user-friendly validation errors (empty if valid)
+    """
+    errors = []
+    sanitized = {}
+    
+    # Validate and sanitize customer name
+    customer_name = str(data.get("customer_name", "")).strip()
+    if len(customer_name) < 2:
+        errors.append("Please enter your full name (at least 2 characters)")
+    elif len(customer_name) > 100:
+        errors.append("Name is too long. Please use a shorter name (max 100 characters)")
+    else:
+        sanitized["customer_name"] = customer_name
+    
+    # Validate and sanitize mobile number
+    mobile = str(data.get("mobile", "")).strip().replace(" ", "").replace("-", "")
+    if not mobile.isdigit():
+        errors.append("Please enter a valid mobile number using digits only")
+    elif len(mobile) != 10:
+        errors.append("Please enter a valid 10-digit mobile number")
+    else:
+        sanitized["mobile"] = mobile
+    
+    # Validate and sanitize PAN
+    pan = str(data.get("pan", "")).strip().upper().replace(" ", "")
+    pan_pattern = r"^[A-Z]{5}[0-9]{4}[A-Z]{1}$"
+    if not re.match(pan_pattern, pan):
+        errors.append("Please enter a valid PAN number (format: ABCDE1234F)")
+    else:
+        sanitized["pan"] = pan
+    
+    # Validate and sanitize Aadhaar
+    aadhaar = str(data.get("aadhaar", "")).strip().replace(" ", "").replace("-", "")
+    if not aadhaar.isdigit():
+        errors.append("Aadhaar should contain only digits")
+    elif len(aadhaar) != 12:
+        errors.append("Please enter a valid 12-digit Aadhaar number")
+    else:
+        sanitized["aadhaar"] = aadhaar
+    
+    # Validate loan amount
+    try:
+        loan_amount = int(data.get("loan_amount", 0))
+        if loan_amount < 10000:
+            errors.append("Minimum loan amount is ₹10,000. Please enter a higher amount")
+        elif loan_amount > 50000000:
+            errors.append("Maximum loan amount is ₹5 Crore. Please enter a lower amount")
+        else:
+            sanitized["loan_amount"] = loan_amount
+    except (ValueError, TypeError):
+        errors.append("Please enter a valid loan amount in numbers")
+    
+    # Validate tenure
+    try:
+        tenure = int(data.get("tenure", 0))
+        if tenure < 6:
+            errors.append("Minimum tenure is 6 months. Please choose a longer tenure")
+        elif tenure > 360:
+            errors.append("Maximum tenure is 360 months (30 years). Please choose a shorter tenure")
+        else:
+            sanitized["tenure"] = tenure
+    except (ValueError, TypeError):
+        errors.append("Please enter a valid tenure in months")
+    
+    # Validate income
+    try:
+        income = int(data.get("income", 0))
+        if income <= 0:
+            errors.append("Please enter your valid monthly income")
+        elif income < 10000:
+            errors.append("Minimum monthly income required is ₹10,000")
+        else:
+            sanitized["income"] = income
+    except (ValueError, TypeError):
+        errors.append("Please enter a valid income amount in numbers")
+    
+    return sanitized, errors
 
 
 chat_router = APIRouter(prefix="/chat", tags=["Chat"])
@@ -206,16 +298,24 @@ async def process_application(
             detail=f"Missing required fields: {', '.join(missing)}. Please provide all information before processing."
         )
     
-    # Create application in database
-    app_data = session.collected_data
+    # Validate and sanitize application data with user-friendly messages
+    sanitized_data, validation_errors = validate_application_data(session.collected_data)
+    
+    if validation_errors:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="\n".join(validation_errors)
+        )
+    
+    # Create application in database using sanitized data
     db_app = Application(
-        customer_name=app_data["customer_name"],
-        mobile=str(app_data["mobile"]),
-        pan=str(app_data["pan"]).upper(),
-        aadhaar=str(app_data["aadhaar"]),
-        loan_amount=int(app_data["loan_amount"]),
-        tenure=int(app_data["tenure"]),
-        income=int(app_data["income"]),
+        customer_name=sanitized_data["customer_name"],
+        mobile=sanitized_data["mobile"],
+        pan=sanitized_data["pan"],
+        aadhaar=sanitized_data["aadhaar"],
+        loan_amount=sanitized_data["loan_amount"],
+        tenure=sanitized_data["tenure"],
+        income=sanitized_data["income"],
         status="PROCESSING"
     )
     
@@ -226,16 +326,16 @@ async def process_application(
     # Update session with application ID
     session.set_application_id(db_app.id)
     
-    # Prepare data for workflow
+    # Prepare data for workflow using sanitized data
     workflow_data = {
         "application_id": db_app.id,
-        "customer_name": app_data["customer_name"],
-        "mobile": str(app_data["mobile"]),
-        "pan": str(app_data["pan"]).upper(),
-        "aadhaar": str(app_data["aadhaar"]),
-        "loan_amount": int(app_data["loan_amount"]),
-        "tenure": int(app_data["tenure"]),
-        "income": int(app_data["income"]),
+        "customer_name": sanitized_data["customer_name"],
+        "mobile": sanitized_data["mobile"],
+        "pan": sanitized_data["pan"],
+        "aadhaar": sanitized_data["aadhaar"],
+        "loan_amount": sanitized_data["loan_amount"],
+        "tenure": sanitized_data["tenure"],
+        "income": sanitized_data["income"],
         "conversation_history": session.messages
     }
     
@@ -256,7 +356,7 @@ async def process_application(
     session.set_stage("completed" if result.get("status") == "SANCTIONED" else "rejected")
     
     # Add final response to conversation
-    final_response = result.get("assistant_response", "")
+    final_response = result.get("final_response", "")
     session.add_message("assistant", final_response)
     
     # Build response steps

@@ -57,67 +57,87 @@ def underwriting_node(state: dict[str, Any]) -> dict[str, Any]:
     Returns:
         Updated state with underwriting decision
     """
-    pan = state.get("pan", "")
-    loan_amount = state.get("loan_amount", 0)
-    tenure = state.get("tenure", 12)
-    income = state.get("income", 0)
-    
-    errors = []
-    
-    # Get credit score (deterministic: always 750)
-    credit_result = get_credit_score(pan)
-    credit_score = credit_result["credit_score"]
-    credit_rating = credit_result["rating"]
-    
-    # Rule 1: Credit Score Check
-    min_credit_score = 600
-    if credit_score < min_credit_score:
-        errors.append(f"Credit score {credit_score} is below minimum {min_credit_score}")
-    
-    # Calculate EMI
-    emi = calculate_emi(loan_amount, tenure)
-    
-    # Rule 2: DTI Ratio (EMI <= 50% of monthly income)
-    max_emi_allowed = income * 0.5
-    if emi > max_emi_allowed:
-        errors.append(
-            f"EMI ₹{emi:,.2f} exceeds 50% of monthly income (max allowed: ₹{max_emi_allowed:,.2f})"
-        )
-    
-    # Rule 3: Loan Amount Cap (max loan = income * 50)
-    max_loan_allowed = income * 50
-    if loan_amount > max_loan_allowed:
-        errors.append(
-            f"Loan amount ₹{loan_amount:,} exceeds maximum allowed ₹{max_loan_allowed:,} "
-            f"(50x monthly income)"
-        )
-    
-    # Calculate debt-to-income ratio
-    dti_ratio = (emi / income * 100) if income > 0 else 0
-    
-    # Build step result
-    is_approved = len(errors) == 0
-    step_result = {
-        "node": "underwriting",
-        "result": "SUCCESS" if is_approved else "FAIL",
-        "data": {
+    try:
+        pan = state.get("pan", "")
+        loan_amount = state.get("loan_amount", 0)
+        tenure = state.get("tenure", 12)
+        income = state.get("income", 0)
+        
+        errors = []
+        
+        # Get credit score (deterministic: always 750)
+        credit_result = get_credit_score(pan)
+        credit_score = credit_result["credit_score"]
+        credit_rating = credit_result["rating"]
+        
+        # Rule 1: Credit Score Check
+        min_credit_score = 600
+        if credit_score < min_credit_score:
+            errors.append(f"Your credit score of {credit_score} is below our minimum requirement of {min_credit_score}")
+        
+        # Calculate EMI
+        emi = calculate_emi(loan_amount, tenure)
+        
+        # Rule 2: DTI Ratio (EMI <= 50% of monthly income)
+        max_emi_allowed = income * 0.5
+        if emi > max_emi_allowed:
+            errors.append(
+                f"Based on your income, your maximum affordable EMI is ₹{max_emi_allowed:,.2f}, "
+                f"but the requested loan would require ₹{emi:,.2f} per month"
+            )
+        
+        # Rule 3: Loan Amount Cap (max loan = income * 50)
+        max_loan_allowed = income * 50
+        if loan_amount > max_loan_allowed:
+            errors.append(
+                f"Based on your income, you can borrow up to ₹{max_loan_allowed:,}. "
+                f"Consider reducing your loan amount or showing additional income"
+            )
+        
+        # Calculate debt-to-income ratio
+        dti_ratio = (emi / income * 100) if income > 0 else 0
+        
+        # Build step result
+        is_approved = len(errors) == 0
+        step_result = {
+            "node": "underwriting",
+            "result": "SUCCESS" if is_approved else "FAIL",
+            "data": {
+                "credit_score": credit_score,
+                "credit_rating": credit_rating,
+                "emi_calculated": round(emi, 2),
+                "max_emi_allowed": round(max_emi_allowed, 2),
+                "max_loan_allowed": max_loan_allowed,
+                "dti_ratio": round(dti_ratio, 2),
+                "interest_rate": "12% p.a."
+            },
+            "message": "Congratulations! Your credit assessment is approved" if is_approved else "; ".join(errors)
+        }
+        
+        # Return state updates
+        current_steps = state.get("steps", [])
+        
+        return {
+            "status": "SUCCESS" if is_approved else "FAIL",
             "credit_score": credit_score,
-            "credit_rating": credit_rating,
-            "emi_calculated": round(emi, 2),
-            "max_emi_allowed": round(max_emi_allowed, 2),
-            "max_loan_allowed": max_loan_allowed,
-            "dti_ratio": round(dti_ratio, 2),
-            "interest_rate": "12% p.a."
-        },
-        "message": "Underwriting approved" if is_approved else "; ".join(errors)
-    }
-    
-    # Return state updates
-    current_steps = state.get("steps", [])
-    
-    return {
-        "status": "SUCCESS" if is_approved else "FAIL",
-        "credit_score": credit_score,
-        "steps": current_steps + [step_result],
-        "error_message": "; ".join(errors) if errors else None
-    }
+            "steps": current_steps + [step_result],
+            "error_message": "; ".join(errors) if errors else None
+        }
+        
+    except Exception as e:
+        # Handle unexpected errors gracefully
+        step_result = {
+            "node": "underwriting",
+            "result": "FAIL",
+            "data": {"error": str(e)},
+            "message": "We encountered an issue during credit assessment. Please try again."
+        }
+        
+        current_steps = state.get("steps", [])
+        
+        return {
+            "status": "FAIL",
+            "credit_score": 0,
+            "steps": current_steps + [step_result],
+            "error_message": f"Credit assessment error: {str(e)}"
+        }

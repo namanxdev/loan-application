@@ -55,7 +55,7 @@ class ChatState(TypedDict, total=False):
     # Workflow state
     status: str
     credit_score: int
-    steps: List[dict]
+    steps: Annotated[List[dict], add]
     current_agent: str
     sanction_pdf_url: Optional[str]
     error_message: Optional[str]

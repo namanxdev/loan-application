@@ -10,7 +10,8 @@ from enum import Enum
 from typing import Optional, List, Any
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import Column, Integer, String, DateTime, JSON
+from sqlalchemy import Column, Integer, String, DateTime, JSON, Boolean, ForeignKey
+from sqlalchemy.orm import relationship
 from services.database import Base
 
 
@@ -122,3 +123,30 @@ class Application(Base):
 
     def __repr__(self):
         return f"<Application(id={self.id}, customer={self.customer_name}, status={self.status})>"
+
+
+class ConversationSession(Base):
+    """
+    SQLAlchemy ORM model for conversation sessions.
+    Maps to 'conversation_sessions' table in PostgreSQL.
+    
+    Stores chat session state for persistent conversation management.
+    Will be migrated to Redis for production deployment.
+    """
+    __tablename__ = "conversation_sessions"
+
+    session_id = Column(String(36), primary_key=True, index=True)
+    messages = Column(JSON, default=list)
+    collected_data = Column(JSON, default=dict)
+    stage = Column(String(50), default="greeting")
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=True)
+    is_active = Column(Boolean, default=True)
+    processing_result = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationship to Application
+    application = relationship("Application", backref="conversation_sessions")
+
+    def __repr__(self):
+        return f"<ConversationSession(id={self.session_id}, stage={self.stage}, active={self.is_active})>"
