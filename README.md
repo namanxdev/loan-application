@@ -4,6 +4,51 @@ An intelligent loan application processing system built with **LangGraph**, **Fa
 
 ## 🏗️ Architecture Overview
 
+### High-Level System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           FRONTEND (Next.js 16)                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │  Login   │  │  User    │  │ Employee │  │  Apply   │  │ Chatbot  │   │
+│  │  Signup  │  │Dashboard │  │Dashboard │  │  Loan    │  │Interface │   │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                          Zustand Store                                  │
+│   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                     │
+│   │  AuthStore  │  │  LoanStore  │  │  ChatStore  │                     │
+│   └─────────────┘  └─────────────┘  └─────────────┘                     │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼ REST API + WebSocket
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          BACKEND (FastAPI)                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   │
+│  │  Auth Routes │  │ Application  │  │  Chat Routes │                   │
+│  │  /api/auth/* │  │  Routes      │  │  /api/chat/* │                   │
+│  └──────────────┘  └──────────────┘  └──────────────┘                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                        LANGGRAPH AGENT WORKFLOW                         │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │                                                                  │   │
+│  │   QueryCleaner → Master → Sales → Verification → Underwriting    │   │
+│  │        ↓            ↓        ↓          ↓             ↓          │   │
+│  │   ResponseFormatter ← ← ← ← ← ← ← Sanction ← ← ← ← ← ←           │   │
+│  │                                                                  │   │
+│  │   🔥 6 Decision Agents + 2 Utility Agents                        │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                          DATABASE (PostgreSQL)                          │
+│   ┌──────┐  ┌──────────────┐  ┌────────────────┐  ┌──────────────┐      │
+│   │Users │  │Applications  │  │AgentEvaluations│  │ChatSessions  │      │
+│   └──────┘  └──────────────┘  └────────────────┘  └──────────────┘      │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Project Structure
+
 ```
 agents/
 ├── .env                          # Environment variables (DATABASE_URL)
@@ -39,24 +84,36 @@ agents/
 
 ## 🔄 LangGraph Workflow
 
-The system processes loan applications through a **deterministic multi-step agent workflow**:
+The system processes loan applications through a **sequential multi-agent workflow** orchestrated by LangGraph:
 
 ```
-START → Sales Node → Verification Node → Underwriting Node → Sanction Node → END
-              ↓              ↓                  ↓
-           [FAIL]         [FAIL]             [FAIL]
-              ↓              ↓                  ↓
-             END            END               END
+START → Agent Alpha → Agent Beta → Agent Gamma → Agent Delta → Agent Epsilon → Agent Zeta → END
+           (Sales)      (KYC)      (Credit)     (Income)      (Fraud)     (Sanction)
+              ↓           ↓           ↓            ↓             ↓             ↓
+           [FAIL]      [FAIL]      [FAIL]       [FAIL]        [FAIL]        [FAIL]
 ```
 
-### Node Details
+### 🤖 Agent System Details
 
-| Node | Purpose | Success Criteria |
-|------|---------|------------------|
-| **Sales Node** | Validates input data | Valid PAN (ABCDE1234F), Aadhaar (12 digits), loan ≥ ₹10,000, tenure 6-360 months |
-| **Verification Node** | KYC verification | PAN & Aadhaar format validation (mock API - always passes if format valid) |
-| **Underwriting Node** | Credit assessment | Credit score ≥ 600, EMI ≤ 50% income, loan ≤ 50x income |
-| **Sanction Node** | Generate PDF | Creates professional sanction letter using ReportLab |
+The system employs 6 specialized decision agents and 2 utility agents to process applications:
+
+#### Decision Agents (Sequential Processing)
+
+| Agent | Name | Role | Responsibilities |
+|-------|------|------|------------------|
+| **Agent Alpha** | Sales Validator | Input Validation | • Validates application completeness<br>• Checks loan-to-income ratio (max 5x)<br>• Validates tenure (6-360 months) |
+| **Agent Beta** | KYC Verifier | Identity Verification | • Validates PAN format (ABCDE1234F)<br>• Validates Aadhaar (12 digits)<br>• Cross-references identity documents |
+| **Agent Gamma** | Credit Analyst | Risk Assessment | • Analyzes credit score (min 650)<br>• Calculates EMI-to-Income ratio (max 50%)<br>• Evaluates repayment capacity |
+| **Agent Delta** | Income Analyzer | Financial Analysis | • Verifies income stability<br>• Checks minimum income requirements (min ₹15k)<br>• Analyzes employment type |
+| **Agent Epsilon** | Fraud Detector | Security | • Checks for suspicious patterns<br>• Validates document authenticity<br>• Cross-references fraud databases |
+| **Agent Zeta** | Sanction Authority | Final Decision | • Compiles all agent results<br>• Makes final approval/rejection decision<br>• Generates official sanction letter PDF |
+
+#### Utility Agents (Chat & Processing)
+
+| Agent | Role | Responsibilities |
+|-------|------|------------------|
+| **QueryCleaner** | Pre-processing | • Cleans user input<br>• Normalizes data formats<br>• Validates required fields |
+| **ResponseFormatter** | Post-processing | • Formats agent outputs for users<br>• Humanizes technical responses<br>• Adds context to decisions |
 
 ### State Schema (LoanState)
 
@@ -99,15 +156,44 @@ class LoanState(TypedDict):
 
 ## 🌐 API Endpoints
 
+### 🔐 Authentication (`/api/auth`)
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/` | API info and available endpoints |
-| `GET` | `/health` | Health check |
+| `POST` | `/signup` | Register new user account |
+| `POST` | `/login` | Authenticate user & get tokens |
+| `POST` | `/refresh` | Refresh access token |
+| `GET` | `/me` | Get current user profile |
+| `POST` | `/logout` | Logout user |
+
+### 🏦 Loan Processing (`/`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | `POST` | `/apply` | Create new loan application |
-| `POST` | `/process/{id}` | Run LangGraph workflow on application |
+| `POST` | `/process/{id}` | Run agent workflow on application |
 | `GET` | `/application/{id}` | Get application details |
-| `GET` | `/applications` | List all applications (paginated) |
+| `GET` | `/health` | System health check |
 | `GET` | `/pdfs/{id}.pdf` | Download sanction letter PDF |
+
+### 💬 Chat System (`/api/chat`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/start` | Start new chat session |
+| `POST` | `/message` | Send message to AI agent |
+| `POST` | `/process` | Process application via chat |
+| `GET` | `/session/{id}` | Get session status |
+| `GET` | `/history/{id}` | Get conversation history |
+| `DELETE` | `/session/{id}` | End chat session |
+
+### 👥 Employee/Admin (`/api/admin`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/applications` | List all applications (with filters) |
+| `GET` | `/applications/{id}` | Get detailed application info |
+
+### 📡 Streaming (`/api/agents`)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/stream/{id}` | Real-time SSE agent updates |
 
 ### Example: Create & Process Application
 
