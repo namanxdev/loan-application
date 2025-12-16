@@ -63,6 +63,15 @@ class StartChatResponse(BaseModel):
     greeting: str
     stage: str
     timestamp: datetime
+    active_agent: str = "master_agent"
+
+
+class AgentThinking(BaseModel):
+    """Agent's thinking/reasoning process"""
+    agent_name: str
+    action: str
+    reasoning: Optional[str] = None
+    extracted_data: Optional[Dict[str, Any]] = None
 
 
 class ChatResponse(BaseModel):
@@ -74,6 +83,8 @@ class ChatResponse(BaseModel):
     missing_fields: List[str]
     ready_to_process: bool
     timestamp: datetime
+    active_agent: str = "master_agent"
+    thinking: Optional[List[AgentThinking]] = None
     metadata: Optional[Dict[str, Any]] = None
 
 

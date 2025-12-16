@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 FastAPI Routes
 
@@ -46,7 +47,7 @@ def create_application(app_data: ApplicationCreate, db: Session = Depends(get_db
     - mobile: 10-digit mobile number
     - pan: PAN number (format: ABCDE1234F)
     - aadhaar: 12-digit Aadhaar number
-    - loan_amount: Requested loan amount (minimum ₹10,000)
+    - loan_amount: Requested loan amount (minimum Rs.10,000)
     - tenure: Loan tenure in months (6-360)
     - income: Monthly income
     

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 PDF Generation Service using ReportLab
 
@@ -149,10 +150,10 @@ def generate_sanction_letter(
         ["Application ID", str(application_id)],
         ["Applicant Name", customer_name],
         ["PAN Number", pan if pan else "N/A"],
-        ["Sanctioned Amount", f"₹ {loan_amount:,}"],
+        ["Sanctioned Amount", f"Rs. {loan_amount:,}"],
         ["Loan Tenure", f"{tenure} months"],
         ["Interest Rate", "12% per annum"],
-        ["EMI Amount", f"₹ {emi:,.2f}"],
+        ["EMI Amount", f"Rs. {emi:,.2f}"],
         ["Credit Score", str(credit_score)],
     ]
     

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Underwriting Node - Credit Assessment and Eligibility
 
@@ -82,15 +83,15 @@ def underwriting_node(state: dict[str, Any]) -> dict[str, Any]:
         max_emi_allowed = income * 0.5
         if emi > max_emi_allowed:
             errors.append(
-                f"Based on your income, your maximum affordable EMI is ₹{max_emi_allowed:,.2f}, "
-                f"but the requested loan would require ₹{emi:,.2f} per month"
+                f"Based on your income, your maximum affordable EMI is Rs.{max_emi_allowed:,.2f}, "
+                f"but the requested loan would require Rs.{emi:,.2f} per month"
             )
         
         # Rule 3: Loan Amount Cap (max loan = income * 50)
         max_loan_allowed = income * 50
         if loan_amount > max_loan_allowed:
             errors.append(
-                f"Based on your income, you can borrow up to ₹{max_loan_allowed:,}. "
+                f"Based on your income, you can borrow up to Rs.{max_loan_allowed:,}. "
                 f"Consider reducing your loan amount or showing additional income"
             )
         

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Chat Routes - API endpoints for conversational loan application
 
@@ -96,9 +97,9 @@ def validate_application_data(data: Dict) -> Tuple[Dict, List[str]]:
     try:
         loan_amount = int(data.get("loan_amount", 0))
         if loan_amount < 10000:
-            errors.append("Minimum loan amount is ₹10,000. Please enter a higher amount")
+            errors.append("Minimum loan amount is Rs.10,000. Please enter a higher amount")
         elif loan_amount > 50000000:
-            errors.append("Maximum loan amount is ₹5 Crore. Please enter a lower amount")
+            errors.append("Maximum loan amount is Rs.5 Crore. Please enter a lower amount")
         else:
             sanitized["loan_amount"] = loan_amount
     except (ValueError, TypeError):
@@ -122,7 +123,7 @@ def validate_application_data(data: Dict) -> Tuple[Dict, List[str]]:
         if income <= 0:
             errors.append("Please enter your valid monthly income")
         elif income < 10000:
-            errors.append("Minimum monthly income required is ₹10,000")
+            errors.append("Minimum monthly income required is Rs.10,000")
         else:
             sanitized["income"] = income
     except (ValueError, TypeError):
@@ -211,8 +212,25 @@ async def send_message(request: ChatRequest):
         else:
             history.append(AIMessage(content=msg["content"]))
     
-    # Extract information from message
-    extracted = master_agent.extract_info(request.message, session.collected_data)
+    # Build thinking/reasoning trace
+    thinking_steps = []
+    
+    # Step 1: Extract information from message
+    thinking_steps.append({
+        "agent_name": "master_agent",
+        "action": "extracting_info",
+        "reasoning": f"Analyzing message for loan application data..."
+    })
+    
+    extracted, validation_errors = master_agent.extract_info(request.message, session.collected_data)
+    
+    thinking_steps.append({
+        "agent_name": "master_agent",
+        "action": "extraction_complete",
+        "reasoning": f"Extracted {len(extracted)} field(s)" if extracted else "No new data extracted",
+        "extracted_data": extracted if extracted else None,
+        "validation_errors": validation_errors if validation_errors else None
+    })
     
     # Update session with extracted data
     if extracted:
@@ -221,21 +239,38 @@ async def send_message(request: ChatRequest):
     # Get missing fields
     missing_fields = master_agent.get_missing_fields(session.collected_data)
     
-    # Determine stage
+    # Determine stage and active agent
     if not session.collected_data:
         stage = "greeting"
+        active_agent = "master_agent"
     elif missing_fields:
         stage = "collecting_info"
+        active_agent = "master_agent"
     else:
         stage = "confirming"
+        active_agent = "master_agent"
     
-    # Generate response using Master Agent
+    thinking_steps.append({
+        "agent_name": active_agent,
+        "action": "determining_next_step",
+        "reasoning": f"Stage: {stage}, Missing fields: {missing_fields if missing_fields else 'None - ready to process!'}"
+    })
+    
+    # Generate response using Master Agent (pass extracted data and validation errors for feedback)
     response = master_agent.generate_response(
         message=request.message,
         history=history,
         current_data=session.collected_data,
-        stage=stage
+        stage=stage,
+        just_extracted=extracted,
+        validation_errors=validation_errors
     )
+    
+    thinking_steps.append({
+        "agent_name": active_agent,
+        "action": "response_generated",
+        "reasoning": "Generated conversational response"
+    })
     
     # Update stage
     session.set_stage(stage)
@@ -246,6 +281,10 @@ async def send_message(request: ChatRequest):
     # Check if ready to process
     ready_to_process = len(missing_fields) == 0
     
+    # Convert thinking steps to AgentThinking models
+    from models.chat_schemas import AgentThinking
+    thinking = [AgentThinking(**step) for step in thinking_steps]
+    
     return ChatResponse(
         session_id=session.session_id,
         response=response,
@@ -254,6 +293,8 @@ async def send_message(request: ChatRequest):
         missing_fields=missing_fields,
         ready_to_process=ready_to_process,
         timestamp=datetime.utcnow(),
+        active_agent=active_agent,
+        thinking=thinking,
         metadata={
             "extracted_info": extracted
         }

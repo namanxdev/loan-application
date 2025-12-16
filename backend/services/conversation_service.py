@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Conversation Service - Manages chat sessions and conversation state
 
@@ -261,7 +262,7 @@ class RAGContextBuilder:
     KNOWLEDGE_BASE = {
         "loan_types": """
         We offer personal loans with the following features:
-        - Loan amounts from ₹10,000 to ₹50,00,000
+        - Loan amounts from Rs.10,000 to Rs.50,00,000
         - Tenure from 6 months to 30 years (360 months)
         - Competitive interest rates starting at 10.5% p.a.
         - No hidden charges
@@ -271,7 +272,7 @@ class RAGContextBuilder:
         "eligibility": """
         Loan Eligibility Criteria:
         - Age: 21-60 years
-        - Minimum income: ₹15,000 per month
+        - Minimum income: Rs.15,000 per month
         - Credit score: 600+ preferred
         - EMI should not exceed 50% of monthly income
         - Maximum loan: 50x monthly income

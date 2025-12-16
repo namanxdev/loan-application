@@ -1,8 +1,9 @@
+# -*- coding: utf-8 -*-
 """
 Sales Node - Initial Validation
 
 Validates basic application details:
-- Loan amount (minimum ₹10,000)
+- Loan amount (minimum Rs.10,000)
 - Tenure (6-360 months)
 - Income (positive value)
 - PAN format (ABCDE1234F)
@@ -20,7 +21,7 @@ def sales_node(state: dict[str, Any]) -> dict[str, Any]:
     Checks:
     - PAN format (5 letters + 4 digits + 1 letter)
     - Aadhaar (12 digits)
-    - Loan amount (minimum ₹10,000)
+    - Loan amount (minimum Rs.10,000)
     - Tenure (6-360 months)
     - Income (positive value)
     
@@ -48,10 +49,10 @@ def sales_node(state: dict[str, Any]) -> dict[str, Any]:
         else:
             validated_fields.append("aadhaar")
         
-        # Validate loan amount: minimum ₹10,000
+        # Validate loan amount: minimum Rs.10,000
         loan_amount = state.get("loan_amount", 0)
         if loan_amount < 10000:
-            errors.append(f"The loan amount ₹{loan_amount:,} is below our minimum of ₹10,000")
+            errors.append(f"The loan amount Rs.{loan_amount:,} is below our minimum of Rs.10,000")
         else:
             validated_fields.append("loan_amount")
         
