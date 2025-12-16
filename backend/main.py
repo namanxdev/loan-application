@@ -24,7 +24,8 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 from api.routes import router
 from services.database import engine, Base
-from models.schemas import Application  # noqa: F401 - Required for table creation
+from models.schemas import Application, AgentEvaluation, StatusHistory, ConversationSession  # noqa: F401 - Required for table creation
+from models.user_schemas import User  # noqa: F401 - Required for table creation
 
 
 @asynccontextmanager
@@ -94,6 +95,18 @@ app.include_router(router)
 # Include Chat routes for conversational loan application
 from api.chat_routes import chat_router
 app.include_router(chat_router)
+
+# Include Auth routes for authentication
+from api.auth_routes import auth_router
+app.include_router(auth_router)
+
+# Include Admin routes for employee dashboard
+from api.admin_routes import admin_router
+app.include_router(admin_router)
+
+# Include Streaming routes for SSE agent updates
+from api.streaming_routes import streaming_router
+app.include_router(streaming_router)
 
 
 @app.get("/")

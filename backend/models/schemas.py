@@ -1,7 +1,8 @@
+# -*- coding: utf-8 -*-
 """
 Data Models and Schemas
 - Pydantic models for API request/response validation
-- SQLAlchemy ORM model for PostgreSQL persistence
+- SQLAlchemy ORM models for PostgreSQL persistence
 """
 
 import re
@@ -10,7 +11,7 @@ from enum import Enum
 from typing import Optional, List, Any
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import Column, Integer, String, DateTime, JSON, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, JSON, Boolean, ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from services.database import Base
 
@@ -25,6 +26,14 @@ class ApplicationStatus(str, Enum):
     FAIL = "FAIL"
     SANCTIONED = "SANCTIONED"
     REJECTED = "REJECTED"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+
+
+class AgentDecision(str, Enum):
+    """Agent decision types"""
+    APPROVE = "approve"
+    REJECT = "reject"
+    REVIEW = "review"
 
 
 # ============== Pydantic Schemas (Request/Response) ==============
@@ -91,6 +100,13 @@ class ApplicationDetail(BaseModel):
     status: str
     sanction_pdf_path: Optional[str] = None
     workflow_steps: Optional[List[Any]] = None
+    user_id: Optional[int] = None
+    assigned_employee_id: Optional[int] = None
+    human_override: bool = False
+    override_reason: Optional[str] = None
+    current_agent: Optional[str] = None
+    final_decision: Optional[str] = None
+    decision_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -98,7 +114,31 @@ class ApplicationDetail(BaseModel):
         from_attributes = True
 
 
-# ============== SQLAlchemy ORM Model ==============
+class AgentResultResponse(BaseModel):
+    """Schema for agent evaluation result"""
+    id: int
+    application_id: int
+    agent_name: str
+    agent_type: str
+    score: Optional[int]
+    decision: str
+    confidence: int
+    explanation_summary: str
+    detailed_analysis: Optional[dict] = None
+    processing_time_ms: Optional[int] = None
+    processed_at: datetime
+    
+    class Config:
+        from_attributes = True
+
+
+class StatusOverrideRequest(BaseModel):
+    """Schema for employee status override"""
+    new_status: str
+    reason: str = Field(..., min_length=10, max_length=500)
+
+
+# ============== SQLAlchemy ORM Models ==============
 
 class Application(Base):
     """
@@ -108,6 +148,11 @@ class Application(Base):
     __tablename__ = "applications"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    
+    # User relationship (optional for backward compatibility)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # Application Details
     customer_name = Column(String(100), nullable=False)
     mobile = Column(String(10), nullable=False)
     pan = Column(String(10), nullable=False)
@@ -115,27 +160,107 @@ class Application(Base):
     loan_amount = Column(Integer, nullable=False)
     tenure = Column(Integer, nullable=False)
     income = Column(Integer, nullable=False)
+    
+    # KYC Details (stored as JSON for flexibility)
+    kyc_details = Column(JSON, default=dict)
+    
+    # Processing
     status = Column(String(20), default="CREATED")
-    sanction_pdf_path = Column(String(255), nullable=True)
     workflow_steps = Column(JSON, default=list)
+    current_agent = Column(String(50), nullable=True)
+    
+    # Results
+    sanction_pdf_path = Column(String(255), nullable=True)
+    final_decision = Column(String(20), nullable=True)
+    decision_reason = Column(String(500), nullable=True)
+    
+    # Human Review
+    assigned_employee_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    human_override = Column(Boolean, default=False)
+    override_reason = Column(String(500), nullable=True)
+    
+    # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    processed_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id], back_populates="applications")
+    assigned_employee = relationship("User", foreign_keys=[assigned_employee_id], back_populates="assigned_applications")
+    agent_evaluations = relationship("AgentEvaluation", back_populates="application", cascade="all, delete-orphan")
+    status_history = relationship("StatusHistory", back_populates="application", cascade="all, delete-orphan")
+    conversation_sessions = relationship("ConversationSession", back_populates="application")
 
     def __repr__(self):
         return f"<Application(id={self.id}, customer={self.customer_name}, status={self.status})>"
+
+
+class AgentEvaluation(Base):
+    """
+    SQLAlchemy ORM model for agent evaluation results.
+    Stores individual agent decisions and scores.
+    """
+    __tablename__ = "agent_evaluations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False)
+    
+    agent_name = Column(String(50), nullable=False)  # e.g., "AgentAlpha"
+    agent_type = Column(String(50), nullable=False)  # e.g., "sales_validation"
+    
+    # Evaluation Results
+    score = Column(Integer, nullable=True)  # 0-100
+    decision = Column(String(20), nullable=False)  # approve/reject/review
+    confidence = Column(Integer, default=100)  # 0-100%
+    
+    # Explanation
+    explanation_summary = Column(String(500), nullable=False)
+    detailed_analysis = Column(JSON, default=dict)
+    
+    # Processing
+    processing_time_ms = Column(Integer, nullable=True)
+    processed_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationship
+    application = relationship("Application", back_populates="agent_evaluations")
+
+    def __repr__(self):
+        return f"<AgentEvaluation(app={self.application_id}, agent={self.agent_name}, decision={self.decision})>"
+
+
+class StatusHistory(Base):
+    """
+    SQLAlchemy ORM model for application status changes.
+    Tracks all status transitions for audit.
+    """
+    __tablename__ = "status_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    application_id = Column(Integer, ForeignKey("applications.id"), nullable=False)
+    
+    old_status = Column(String(20), nullable=False)
+    new_status = Column(String(20), nullable=False)
+    changed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    reason = Column(String(500), nullable=True)
+    changed_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    application = relationship("Application", back_populates="status_history")
+    changed_by = relationship("User")
+
+    def __repr__(self):
+        return f"<StatusHistory(app={self.application_id}, {self.old_status} -> {self.new_status})>"
 
 
 class ConversationSession(Base):
     """
     SQLAlchemy ORM model for conversation sessions.
     Maps to 'conversation_sessions' table in PostgreSQL.
-    
-    Stores chat session state for persistent conversation management.
-    Will be migrated to Redis for production deployment.
     """
     __tablename__ = "conversation_sessions"
 
     session_id = Column(String(36), primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     messages = Column(JSON, default=list)
     collected_data = Column(JSON, default=dict)
     stage = Column(String(50), default="greeting")
@@ -145,8 +270,9 @@ class ConversationSession(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationship to Application
-    application = relationship("Application", backref="conversation_sessions")
+    # Relationships
+    application = relationship("Application", back_populates="conversation_sessions")
+    user = relationship("User")
 
     def __repr__(self):
         return f"<ConversationSession(id={self.session_id}, stage={self.stage}, active={self.is_active})>"

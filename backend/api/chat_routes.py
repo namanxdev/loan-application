@@ -392,8 +392,12 @@ async def process_application(
     db.commit()
     db.refresh(db_app)
     
-    # Store processing result in session
-    session.set_processing_result(result)
+    # Store processing result in session (exclude non-serializable messages)
+    serializable_result = result.copy()
+    if "messages" in serializable_result:
+        del serializable_result["messages"]
+        
+    session.set_processing_result(serializable_result)
     session.set_stage("completed" if result.get("status") == "SANCTIONED" else "rejected")
     
     # Add final response to conversation
