@@ -84,6 +84,7 @@ class UserCreate(BaseModel):
     phone: str = Field(..., pattern=r"^\d{10}$")
     password: str = Field(..., min_length=8)
     full_name: str = Field(..., min_length=2, max_length=100)
+    role: Optional[str] = Field(default="customer", description="User role: customer, employee, or admin")
     
     @field_validator("password")
     @classmethod

@@ -53,13 +53,19 @@ async def signup(user_data: UserCreate, db: Session = Depends(get_db)):
             detail="Phone number already registered"
         )
     
+    # Determine role (default to customer, allow employee/admin for internal use)
+    role = UserRole.CUSTOMER
+    if user_data.role:
+        role_map = {"customer": UserRole.CUSTOMER, "employee": UserRole.EMPLOYEE, "admin": UserRole.ADMIN}
+        role = role_map.get(user_data.role.lower(), UserRole.CUSTOMER)
+    
     # Create user
     user = User(
         email=user_data.email,
         phone=user_data.phone,
         full_name=user_data.full_name,
         hashed_password=hash_password(user_data.password),
-        role=UserRole.CUSTOMER
+        role=role
     )
     
     db.add(user)

@@ -9,6 +9,7 @@ API endpoints for loan processing:
 - GET /health - Health check endpoint
 """
 
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.database import get_db
+from services.auth_service import get_current_user_optional
 from models.schemas import (
     Application,
     ApplicationCreate,
@@ -25,6 +27,7 @@ from models.schemas import (
     ApplicationDetail,
     StepResult
 )
+from models.user_schemas import User, UserRole
 from graph.loan_graph import run_loan_workflow
 
 
@@ -169,18 +172,47 @@ def get_application(application_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/applications")
-def list_applications(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def list_applications(
+    skip: int = 0, 
+    limit: int = 100, 
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
     """
-    List all loan applications with pagination.
+    List loan applications with pagination.
+    
+    - Employees/Admins: See ALL applications
+    - Customers: See ONLY their own applications
+    - Unauthenticated: Empty list
     
     Query params:
     - skip: Number of records to skip (default: 0)
     - limit: Maximum records to return (default: 100)
     """
-    applications = db.query(Application).offset(skip).limit(limit).all()
+    # If no user is logged in, return empty list
+    if not current_user:
+        return {
+            "total": 0,
+            "skip": skip,
+            "limit": limit,
+            "applications": []
+        }
+    
+    # If Employee/Admin, show ALL applications
+    if current_user.role in [UserRole.EMPLOYEE, UserRole.ADMIN]:
+        applications = db.query(Application).offset(skip).limit(limit).all()
+        total = db.query(Application).count()
+    else:
+        # If Customer, show ONLY their applications
+        applications = db.query(Application).filter(
+            Application.user_id == current_user.id
+        ).offset(skip).limit(limit).all()
+        total = db.query(Application).filter(
+            Application.user_id == current_user.id
+        ).count()
     
     return {
-        "total": db.query(Application).count(),
+        "total": total,
         "skip": skip,
         "limit": limit,
         "applications": [
