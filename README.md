@@ -47,6 +47,24 @@ An intelligent loan application processing system built with **LangGraph**, **Fa
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 🖥️ Dashboards
+
+The system features two distinct web interfaces tailored for different user roles:
+
+#### 👤 Customer Dashboard
+- **Loan Application**: Intuitive multi-step form for new loan requests.
+- **Status Tracking**: Real-time progress tracking of active applications.
+- **Chat Interface**: AI-powered assistant for queries and application support.
+- **Document Management**: Upload and view submitted documents.
+- **History**: View past applications and sanction letters.
+
+#### 👔 Employee Dashboard (Admin)
+- **Application Review**: Comprehensive view of all incoming loan applications.
+- **Workflow Monitoring**: Visual status of the agentic workflow for each application.
+- **Manual Override**: Ability to intervene or review flagged applications.
+- **Analytics**: Statistics on loan processing times, approval rates, and volumes.
+- **User Management**: Manage customer accounts and system settings.
+
 ### Project Structure
 
 ```
